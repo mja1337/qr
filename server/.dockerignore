@@ -1,0 +1,6 @@
+.venv
+data
+__pycache__
+*.db
+*.sqlite3
+*.log

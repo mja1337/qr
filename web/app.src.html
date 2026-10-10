@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Offline QR code generator. Runs in your browser with no network calls and no tracking.">
+<meta name="theme-color" content="#f4f0ea">
+<meta property="og:title" content="QR code generator">
+<meta property="og:description" content="Offline QR codes. No network calls and no tracking. Data stays in your browser.">
+<meta property="og:image" content="https://mja1337.github.io/qr/docs/social-preview.png">
+<meta name="twitter:card" content="summary_large_image">
+<title>QR code generator</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.png" type="image/png" sizes="128x128">
+<!--
+  QR code generator: single self-contained page, no backend, no network requests.
+  QR encoding: "QR Code Generator for JavaScript" (npm qrcode-generator 2.0.4)
+    Copyright (c) 2009 Kazuhiko Arase, MIT license, https://github.com/kazuhikoarase/qrcode-generator
+    Inlined verbatim below (plus its UTF-8 helper). "QR Code" is a registered trademark of DENSO WAVE INCORPORATED.
+-->
+<style>
+  :root {
+    --bg: #f4f0ea;
+    --ink: #241f33;
+    --muted: #534e60;
+    --card: #fffdfb;
+    --line: #e6dcea;
+    --accent: #5c4a84;
+    --accent-deep: #4a386e;
+    --soft: #f3eaf8;
+    --soft-ink: #3d2d58;
+    --focus: #6d4ea3;
+    --err: #8f2433;
+    --ok: #1c6b3c;
+    --shadow: 0 1px 1px rgba(70, 50, 90, 0.04), 0 12px 32px rgba(70, 50, 90, 0.08);
+    --pill: 0 8px 18px rgba(86, 64, 120, 0.08), inset 0 1px 0 #fff;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: light; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    color: var(--ink);
+    background:
+      radial-gradient(900px 420px at -10% -10%, #efe4f7 0%, transparent 55%),
+      radial-gradient(800px 380px at 110% -8%, #e5f3ea 0%, transparent 50%),
+      radial-gradient(700px 360px at 80% 120%, #f8e9ef 0%, transparent 46%),
+      var(--bg);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  ::selection { background: #e4d6f4; color: var(--ink); }
+  .skip {
+    position: absolute;
+    left: 0.75rem;
+    top: 0.75rem;
+    transform: translateY(-160%);
+    background: var(--accent);
+    color: #fff;
+    padding: 0.55rem 0.9rem;
+    border-radius: 999px;
+    z-index: 5;
+    text-decoration: none;
+    font-weight: 650;
+  }
+  .skip:focus { transform: none; outline: 3px solid var(--focus); outline-offset: 3px; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 1.35rem 1.1rem 3rem; }
+  .hero { margin: 0.35rem 0 1.15rem; }
+  .brand { display: flex; align-items: center; gap: 0.9rem; }
+  .logo { width: 56px; height: 56px; flex: 0 0 auto; filter: drop-shadow(0 8px 14px rgba(80, 55, 120, 0.18)); }
+  .eyebrow {
+    display: inline-block;
+    margin: 0 0 0.15rem;
+    padding: 0.18rem 0.7rem;
+    border-radius: 999px;
+    background: var(--soft);
+    color: var(--soft-ink);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  h1 { font-size: 1.85rem; line-height: 1.15; margin: 0; font-weight: 720; letter-spacing: -0.02em; }
+  h2 { font-size: 1.15rem; margin: 0 0 0.75rem; letter-spacing: -0.01em; }
+  .lede { margin: 0.85rem 0 0; max-width: 62ch; color: var(--muted); }
+  .card {
+    background: var(--card);
+    border: 1px solid #efe7f4;
+    border-radius: 28px;
+    padding: 1.3rem 1.35rem 1.4rem;
+    margin: 0 0 1rem;
+    box-shadow: var(--shadow);
+  }
+  label, .field { font-weight: 650; color: var(--soft-ink); font-size: 0.95rem; }
+  .field { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+  .stack { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.85rem; }
+  input[type="text"], select, textarea, input[type="file"] {
+    font: inherit;
+    color: var(--ink);
+    background-color: #fff;
+    border: 1.5px solid var(--line);
+    border-radius: 999px;
+    padding: 0.85rem 1.15rem;
+    box-shadow: var(--pill);
+    width: 100%;
+  }
+  textarea {
+    border-radius: 24px;
+    min-height: 11rem;
+    resize: vertical;
+    line-height: 1.45;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+    font-weight: 450;
+  }
+  input[type="file"] { padding: 0.65rem 0.9rem; font-weight: 500; color: var(--muted); }
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%235c4a84' d='M1.2.8 6 5.6 10.8.8 12 2 6 8 0 2z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    padding-right: 2.5rem;
+  }
+  input[type="checkbox"] { width: 1.15rem; height: 1.15rem; accent-color: var(--accent); margin: 0; }
+  .fields {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin: 0.15rem 0 0.95rem;
+  }
+  .actions, .row, .links { display: flex; flex-wrap: wrap; align-items: center; gap: 0.55rem 0.65rem; }
+  .row { margin-bottom: 0.35rem; }
+  .check { display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 650; }
+  button {
+    font: inherit;
+    font-weight: 650;
+    color: var(--soft-ink);
+    background: linear-gradient(180deg, #fbf7fd 0%, #f0e6f8 100%);
+    border: 1px solid #e4d6f2;
+    border-radius: 999px;
+    padding: 0.72rem 1.15rem;
+    box-shadow: 0 8px 16px rgba(80, 55, 120, 0.1), inset 0 1px 0 #fff;
+    cursor: pointer;
+  }
+  button.primary {
+    color: #fff;
+    background: linear-gradient(180deg, #6a5894 0%, #544278 100%);
+    border-color: #4a386e;
+    box-shadow: 0 10px 18px rgba(72, 48, 112, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  }
+  button:hover:not(:disabled) { transform: translateY(-1px); }
+  button:active:not(:disabled) { transform: translateY(0); }
+  button:disabled { opacity: 0.48; cursor: not-allowed; box-shadow: none; transform: none; }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+  input[type="text"]:focus-visible, select:focus-visible, textarea:focus-visible, input[type="file"]:focus-visible {
+    border-color: var(--accent);
+  }
+  .muted { color: var(--muted); font-size: 0.92rem; font-weight: 450; }
+  .err { color: var(--err); font-weight: 650; }
+  .ok { color: var(--ok); font-weight: 650; }
+  #genMsg, #ioMsg, #dbMsg { min-height: 1.35em; margin: 0.65rem 0 0; }
+  .stage {
+    margin-top: 0.9rem;
+    min-height: 200px;
+    display: grid;
+    place-items: center;
+    padding: 1.15rem;
+    border-radius: 26px;
+    background: radial-gradient(circle at 50% 42%, #fff 0%, #f6f2fa 72%);
+    border: 1.5px dashed #e0d4ee;
+    box-shadow: inset 0 1px 0 #fff;
+  }
+  .preview-empty { margin: 0; text-align: center; color: var(--muted); }
+  #preview p { margin: 0; padding: 0.7rem; background: #fff; border-radius: 22px; box-shadow: 0 12px 28px rgba(70, 50, 90, 0.1); }
+  #preview img { display: block; max-width: min(100%, 320px); height: auto; image-rendering: pixelated; }
+  .table-wrap { overflow-x: auto; margin: 0.4rem 0 0.85rem; border-radius: 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+  th {
+    text-align: left;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 700;
+  }
+  td, th { padding: 0.6rem 0.45rem; border-bottom: 1px solid #f0e8f4; vertical-align: middle; word-break: break-word; }
+  td:last-child { white-space: nowrap; }
+  #codes img {
+    width: 56px;
+    height: 56px;
+    object-fit: contain;
+    background: #fff;
+    border-radius: 6px;
+    box-shadow: 0 4px 10px rgba(70, 50, 90, 0.08);
+    image-rendering: pixelated;
+  }
+  #codes button { padding: 0.45rem 0.75rem; margin: 0.12rem 0.28rem 0.12rem 0; }
+  .file { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.75rem; font-weight: 650; color: var(--soft-ink); }
+  .fine { color: var(--muted); font-size: 0.85rem; margin: 0.4rem 0 0; }
+  @media (max-width: 700px) {
+    .wrap { padding: 0.85rem 0.75rem 2.4rem; }
+    h1 { font-size: 1.6rem; }
+    .card { padding: 1.05rem 0.95rem 1.15rem; border-radius: 22px; }
+    .fields { grid-template-columns: 1fr; }
+    .actions button, #clearAll { width: 100%; }
+    .logo { width: 48px; height: 48px; }
+    td:last-child { white-space: normal; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    button { transition: none; }
+    button:hover:not(:disabled) { transform: none; }
+  }
+  @media (forced-colors: active) {
+    button, input, select, textarea, .card { border: 1px solid ButtonText; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#make">Skip to the generator</a>
+<div class="wrap">
+  <header class="hero">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="9" fill="#5c4a84"/>
+        <g fill="#ffffff">
+          <rect x="4.5" y="4.5" width="10" height="10" rx="2"/>
+          <rect x="17.5" y="4.5" width="10" height="10" rx="2"/>
+          <rect x="4.5" y="17.5" width="10" height="10" rx="2"/>
+        </g>
+        <g fill="#5c4a84">
+          <rect x="7" y="7" width="5" height="5" rx="1"/>
+          <rect x="20" y="7" width="5" height="5" rx="1"/>
+          <rect x="7" y="20" width="5" height="5" rx="1"/>
+        </g>
+        <g fill="#f6f1e6">
+          <rect x="18" y="18" width="3.4" height="3.4" rx="0.7"/>
+          <rect x="23.1" y="18" width="3.4" height="3.4" rx="0.7"/>
+          <rect x="18" y="23.1" width="3.4" height="3.4" rx="0.7"/>
+          <rect x="23.1" y="23.1" width="3.4" height="3.4" rx="0.7"/>
+        </g>
+      </svg>
+      <div>
+        <p class="eyebrow">Offline · no tracking</p>
+        <h1>QR code generator</h1>
+      </div>
+    </div>
+    <p class="lede">Runs entirely in this page. It makes no network calls and it does not track you. Codes are plain black on white with a 4-module quiet zone.</p>
+  </header>
+
+  <section class="card" id="make" aria-labelledby="make-heading">
+    <h2 id="make-heading">Make a code</h2>
+    <div class="stack">
+      <label for="data">URL or text</label>
+      <input id="data" type="text" placeholder="https://example.com/" value="" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="fields">
+      <label class="field">Format
+        <select id="format"><option value="png">PNG</option><option value="svg">SVG</option></select>
+      </label>
+      <label class="field">Size
+        <select id="box"><option>4</option><option>6</option><option selected>10</option><option>16</option></select>
+      </label>
+      <label class="field">Error correction
+        <select id="ec"><option>L</option><option selected>M</option><option>Q</option><option>H</option></select>
+      </label>
+    </div>
+    <div class="actions">
+      <button id="gen" class="primary" type="button">Generate</button>
+      <button id="dlPng" type="button" disabled>Download PNG</button>
+      <button id="dlSvg" type="button" disabled>Download SVG</button>
+    </div>
+    <p id="genMsg" class="muted" role="status"></p>
+    <div id="preview" class="stage">
+      <p class="preview-empty">Your code will show up here.</p>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="saved-heading">
+    <h2 id="saved-heading">Saved codes</h2>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="dbOn"> Save generated codes</label>
+      <span class="muted">Storage: <b id="backend">?</b></span>
+    </div>
+    <div id="dbMsg" class="muted" role="status"></div>
+    <div class="table-wrap">
+      <table id="codes">
+        <thead><tr><th></th><th>Data</th><th>Format</th><th>Options</th><th>Created (UTC)</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <button id="clearAll" type="button">Delete all</button>
+  </section>
+
+  <section class="card" aria-labelledby="json-heading">
+    <h2 id="json-heading">JSON export / import</h2>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="incImg"> Include images (base64)</label>
+    </div>
+    <p class="muted">Images are regenerated from the saved data, so they are not stored.</p>
+    <div class="actions">
+      <button id="dlJson" type="button">Download export.json</button>
+      <button id="copyJson" type="button">Copy JSON</button>
+      <button id="showJson" type="button">Show JSON</button>
+      <button id="importBtn" type="button">Import JSON from box below</button>
+    </div>
+    <label class="file">or choose a file
+      <input type="file" id="importFile" accept=".json,application/json">
+    </label>
+    <p id="ioMsg" class="muted" role="status"></p>
+    <textarea id="jsonBox" rows="10" spellcheck="false" placeholder="Export appears here. Paste an export here to import."></textarea>
+  </section>
+
+  <p class="fine">QR encoder: qrcode-generator by Kazuhiko Arase (MIT). "QR Code" is a registered trademark of DENSO WAVE INCORPORATED.</p>
+</div>
+<script>
+/*__QRCODE_LIB__*/
+</script>
+<script>
+"use strict";
+// ======================= configuration (equivalent of the template's env vars) =======================
+const CONFIG = {
+  STORAGE_ENABLED: true,        // like QR_DB_ENABLED: default ON; set false to never touch storage
+  STORAGE_SHARED: false,        // false = personal (per-user) artifact storage; true = shared with every viewer
+  STORAGE_KEY: "qrgen-codes-v1",// single key holding all records (batched: one read/write per change)
+  MAX_VALUE_CHARS: 4500000,     // stay under the reported ~5 MB per-value limit (unconfirmed); 20 MB per artifact is documented
+  QUIET_ZONE: 4,
+  MAX_DATA: 2048,
+};
+
+// ======================= QR rendering =======================
+qrcode.stringToBytes = qrcode.stringToBytesFuncs["UTF-8"];
+function encode(data, ec) {
+  const qr = qrcode(0, ec);          // type 0 = smallest version that fits
+  qr.addData(data, "Byte");
+  qr.make();
+  return qr;
+}
+function versionOf(qr) { return (qr.getModuleCount() - 17) / 4; }
+function toSvg(qr, box, border) {
+  const n = qr.getModuleCount(), total = n + 2 * border;
+  let d = "";
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++)
+    if (qr.isDark(r, c)) d += `M${c + border} ${r + border}h1v1h-1z`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${total * box}" height="${total * box}" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path fill="#000" d="${d}"/></svg>`;
+}
+function toPngDataUrl(qr, box, border) {
+  const n = qr.getModuleCount(), size = (n + 2 * border) * box;
+  const cv = document.createElement("canvas"); cv.width = cv.height = size;
+  const g = cv.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, size, size); g.fillStyle = "#000";
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++)
+    if (qr.isDark(r, c)) g.fillRect((c + border) * box, (r + border) * box, box, box);
+  return cv.toDataURL("image/png");
+}
+const b64ToBytesLen = b64 => Math.floor(b64.length * 3 / 4) - (b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0);
+const utf8b64 = s => btoa(unescape(encodeURIComponent(s)));
+// Returns {mime, base64, dataUrl, version, bytes}
+function render(data, format, opts) {
+  if (!data || data.length > CONFIG.MAX_DATA) throw new Error(`Enter 1-${CONFIG.MAX_DATA} characters`);
+  const qr = encode(data, opts.ec);
+  let mime, base64;
+  if (format === "svg") { mime = "image/svg+xml"; base64 = utf8b64(toSvg(qr, opts.box, opts.border)); }
+  else { mime = "image/png"; base64 = toPngDataUrl(qr, opts.box, opts.border).split(",")[1]; }
+  return { mime, base64, dataUrl: `data:${mime};base64,${base64}`, version: versionOf(qr), bytes: b64ToBytesLen(base64) };
+}
+
+// ======================= storage adapter =======================
+// 1) artifact persistent storage (window.storage) if the host injects it
+// 2) localStorage if usable (may be blocked inside a sandboxed artifact frame)
+// 3) in-memory (lost on reload)
+const Storage = (() => {
+  const hasArtifact = typeof window.storage === "object" && window.storage && typeof window.storage.get === "function" && typeof window.storage.set === "function";
+  let ls = null;
+  if (!hasArtifact) { try { const k = "__qrgen_probe"; localStorage.setItem(k, "1"); localStorage.removeItem(k); ls = localStorage; } catch (e) { ls = null; } }
+  const mem = {};
+  const backend = hasArtifact ? `artifact storage (${CONFIG.STORAGE_SHARED ? "shared: visible to everyone using this artifact" : "personal"})`
+                : ls ? "browser localStorage (this browser only)" : "memory only (lost on reload)";
+  async function get(key) {
+    if (hasArtifact) {
+      try { const r = await window.storage.get(key, CONFIG.STORAGE_SHARED); return r && typeof r.value === "string" ? r.value : null; }
+      catch (e) { return null; }             // missing key may throw
+    }
+    if (ls) return ls.getItem(key);
+    return key in mem ? mem[key] : null;
+  }
+  async function set(key, value) {
+    if (value.length > CONFIG.MAX_VALUE_CHARS) throw new Error(`Saved data would be ${value.length} chars (limit ${CONFIG.MAX_VALUE_CHARS}). Export and delete some codes.`);
+    if (hasArtifact) { await window.storage.set(key, value, CONFIG.STORAGE_SHARED); return; }
+    if (ls) { ls.setItem(key, value); return; }
+    mem[key] = value;
+  }
+  return { get, set, backend, kind: hasArtifact ? "artifact" : ls ? "localStorage" : "memory" };
+})();
+
+// ======================= app state =======================
+const $ = id => document.getElementById(id);
+let codes = [];            // [{id,data,format,options,version,created_at,bytes}]
+let current = null;        // last render {data, format, opts, ...}
+let dbOn = CONFIG.STORAGE_ENABLED;
+
+async function load() {
+  if (!dbOn) { codes = []; return; }
+  const raw = await Storage.get(CONFIG.STORAGE_KEY);
+  try { codes = raw ? (JSON.parse(raw).codes || []) : []; } catch (e) { codes = []; $("dbMsg").textContent = "Stored data unreadable; starting empty."; }
+}
+async function save() {
+  if (!dbOn) return;
+  await Storage.set(CONFIG.STORAGE_KEY, JSON.stringify({ schema: 1, codes }));
+}
+const newId = () => { const a = new Uint8Array(6); crypto.getRandomValues(a); return [...a].map(b => b.toString(16).padStart(2, "0")).join(""); };
+const opts = () => ({ box: +$("box").value, border: CONFIG.QUIET_ZONE, ec: $("ec").value });
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function renderList() {
+  $("backend").textContent = dbOn ? Storage.backend : "off";
+  $("clearAll").disabled = !dbOn || !codes.length;
+  const tb = $("codes").querySelector("tbody");
+  if (!dbOn) { tb.innerHTML = `<tr><td colspan="6" class="muted">Saving is off. Nothing is read from or written to storage.</td></tr>`; return; }
+  if (!codes.length) { tb.innerHTML = `<tr><td colspan="6" class="muted">No saved codes yet.</td></tr>`; return; }
+  tb.innerHTML = codes.slice().reverse().map(c => {
+    const thumb = render(c.data, "svg", { ...c.options, box: 2 }).dataUrl;
+    return `<tr data-id="${c.id}"><td><img src="${thumb}" width="56" height="56" alt=""></td><td>${esc(c.data)}</td><td>${c.format}</td>
+      <td>${esc(JSON.stringify(c.options))}</td><td>${c.created_at}</td>
+      <td><button data-act="dl">Download</button><button data-act="del">Delete</button></td></tr>`;
+  }).join("");
+}
+
+// ======================= downloads & clipboard =======================
+// Note: inside claude.ai the viewer blocks downloads a page starts itself (incl. data:/blob: links)
+// unless the artifact is published with the downloads capability. The JSON box / copy button is the fallback.
+function download(name, mime, base64OrText, isBase64) {
+  const blob = isBase64 ? new Blob([Uint8Array.from(atob(base64OrText), ch => ch.charCodeAt(0))], { type: mime })
+                        : new Blob([base64OrText], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; }
+  catch (e) { const box = $("jsonBox"); box.value = t; box.select(); try { return document.execCommand("copy"); } catch (e2) { return false; } }
+}
+
+// ======================= export / import =======================
+function exportDoc(includeImages) {
+  return {
+    exported_at: new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00"),
+    count: codes.length,
+    include_images: includeImages,
+    source: "qrgen-artifact",
+    codes: codes.map(c => {
+      const row = { id: c.id, data: c.data, format: c.format, options: c.options, version: c.version, created_at: c.created_at, bytes: c.bytes };
+      if (includeImages) row.image_base64 = render(c.data, c.format, c.options).base64;
+      return row;
+    }),
+  };
+}
+function validRow(r) {
+  return r && typeof r.data === "string" && r.data.length && r.data.length <= CONFIG.MAX_DATA && (r.format === "png" || r.format === "svg");
+}
+async function importDoc(doc) {
+  if (!dbOn) throw new Error("Saving is off; turn it on to import.");
+  const rows = Array.isArray(doc) ? doc : doc && Array.isArray(doc.codes) ? doc.codes : null;
+  if (!rows) throw new Error("Not an export file (expected {codes:[...]})");
+  const have = new Set(codes.map(c => c.id)); let added = 0, skipped = 0;
+  for (const r of rows) {
+    if (!validRow(r)) { skipped++; continue; }
+    const o = r.options || {};
+    const options = { box: Math.min(50, Math.max(1, +o.box || 10)), border: Math.max(4, +o.border || 4), ec: "LMQH".includes(o.ec) && o.ec ? o.ec : "M" };
+    const id = typeof r.id === "string" && /^[0-9a-f]{6,32}$/.test(r.id) ? r.id : newId();
+    if (have.has(id)) { skipped++; continue; }
+    const img = render(r.data, r.format, options);   // recompute version/bytes; image_base64 in the file is ignored
+    codes.push({ id, data: r.data, format: r.format, options, version: img.version, created_at: r.created_at || new Date().toISOString(), bytes: img.bytes });
+    have.add(id); added++;
+  }
+  await save();
+  return { added, skipped };
+}
+
+// ======================= wiring =======================
+$("dbOn").checked = dbOn;
+$("gen").onclick = async () => {
+  $("genMsg").className = "muted";
+  try {
+    const data = $("data").value.trim(), format = $("format").value, o = opts();
+    const img = render(data, format, o);
+    current = { data, format, opts: o, ...img };
+    $("preview").innerHTML = `<p><img id="qrImg" alt="QR code" src="${img.dataUrl}"></p>`;
+    $("dlPng").disabled = $("dlSvg").disabled = false;
+    let msg = `Version ${img.version}, EC ${o.ec}, ${img.bytes} bytes`;
+    if (dbOn) {
+      const rec = { id: newId(), data, format, options: o, version: img.version, created_at: new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00"), bytes: img.bytes };
+      codes.push(rec);
+      try { await save(); msg += ` · saved (${rec.id})`; } catch (e) { codes.pop(); msg += ` · not saved: ${e.message}`; $("genMsg").className = "err"; }
+      renderList();
+    }
+    $("genMsg").textContent = msg;
+  } catch (e) { $("genMsg").textContent = e.message; $("genMsg").className = "err"; }
+};
+$("dlPng").onclick = () => { if (!current) return; const r = render(current.data, "png", current.opts); download("qr.png", "image/png", r.base64, true); };
+$("dlSvg").onclick = () => { if (!current) return; const r = render(current.data, "svg", current.opts); download("qr.svg", "image/svg+xml", r.base64, true); };
+$("dbOn").onchange = async e => { dbOn = e.target.checked; await load(); renderList(); };
+$("codes").onclick = async e => {
+  const btn = e.target.closest("button"); if (!btn) return;
+  const id = btn.closest("tr").dataset.id, c = codes.find(x => x.id === id); if (!c) return;
+  if (btn.dataset.act === "dl") { const r = render(c.data, c.format, c.options); download(`qr-${c.id}.${c.format}`, r.mime, r.base64, true); }
+  if (btn.dataset.act === "del") { codes = codes.filter(x => x.id !== id); await save(); renderList(); }
+};
+$("clearAll").onclick = async () => { if (!confirm(`Delete all ${codes.length} saved codes?`)) return; codes = []; await save(); renderList(); };
+const exportText = () => JSON.stringify(exportDoc($("incImg").checked), null, 2);
+$("dlJson").onclick = () => { const t = exportText(); $("jsonBox").value = t; download("export.json", "application/json", t, false); $("ioMsg").textContent = `export.json: ${codes.length} codes`; };
+$("copyJson").onclick = async () => { const t = exportText(); $("ioMsg").textContent = (await copyText(t)) ? `Copied ${codes.length} codes to the clipboard` : "Clipboard blocked: the JSON is in the box below, copy it manually"; $("jsonBox").value = t; };
+$("showJson").onclick = () => { $("jsonBox").value = exportText(); };
+async function doImport(text) {
+  try { const r = await importDoc(JSON.parse(text)); renderList(); $("ioMsg").textContent = `Imported ${r.added}, skipped ${r.skipped}`; $("ioMsg").className = "ok"; }
+  catch (e) { $("ioMsg").textContent = "Import failed: " + e.message; $("ioMsg").className = "err"; }
+}
+$("importBtn").onclick = () => doImport($("jsonBox").value);
+$("importFile").onchange = async e => { const f = e.target.files[0]; if (f) doImport(await f.text()); e.target.value = ""; };
+
+// small hook for automated tests; harmless otherwise
+window.qrgen = { CONFIG, Storage, exportDoc, importDoc, render, get codes() { return codes; } };
+
+(async () => { await load(); renderList(); })();
+
+</script>
+</body>
+</html>
