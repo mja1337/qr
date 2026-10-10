@@ -151,3 +151,4 @@ qrcode-generator is also MIT. See `web/vendor/LICENSE-qrcode-generator.txt`.
 ## Social preview
 
 [`docs/social-preview.png`](docs/social-preview.png) is a 1280×640 image for the repository social preview. Upload it under **Settings → General → Social preview**. GitHub does not take that image from the repository on its own.
+
