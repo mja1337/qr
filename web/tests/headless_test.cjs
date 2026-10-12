@@ -91,6 +91,38 @@ async function gen(page, data, format, box, ec) {
      await page.$eval("#ioMsg", e => e.textContent));
   await page.click("#importBtn"); await page.waitForFunction(() => /skipped 3/.test(document.querySelector("#ioMsg").textContent));
   ok("A re-import skips duplicates", true);
+
+  // ---------- A2: WiFi + Contact content types ----------
+  const wifiExpect = "WIFI:T:WPA;S:Cafe\\;Net;P:p\\:ass;H:true;;";
+  const wifiBuilt = await page.evaluate(() => window.qrgen.buildWifi({ ssid: "Cafe;Net", password: "p:ass", auth: "WPA", hidden: true }));
+  ok("A2 buildWifi escapes ; and :", wifiBuilt === wifiExpect, wifiBuilt);
+  await page.select("#kind", "wifi");
+  await page.$eval("#wifi-ssid", el => { el.value = "Cafe;Net"; });
+  await page.$eval("#wifi-pass", el => { el.value = "p:ass"; });
+  await page.select("#wifi-auth", "WPA");
+  await page.$eval("#wifi-hidden", el => { el.checked = true; });
+  await page.select("#format", "png"); await page.select("#box", "10"); await page.select("#ec", "M");
+  await page.evaluate(() => { document.querySelector("#genMsg").textContent = ""; });
+  await page.click("#gen");
+  await page.waitForFunction(() => /Version/.test(document.querySelector("#genMsg").textContent));
+  let wifiSaved = await page.evaluate(() => window.qrgen.codes[window.qrgen.codes.length - 1]?.data);
+  ok("A2 WiFi form generates escaped payload", wifiSaved === wifiExpect, wifiSaved);
+  save("a-wifi.png", await page.$eval("#qrImg", e => e.src));
+
+  const vcardExpect = "BEGIN:VCARD\nVERSION:3.0\nFN:Jane Doe\nTEL:+15551234567\nEMAIL:jane@example.com\nEND:VCARD";
+  const vcardBuilt = await page.evaluate(() => window.qrgen.buildVCard({ name: "Jane Doe", phone: "+15551234567", email: "jane@example.com" }));
+  ok("A2 buildVCard format", vcardBuilt === vcardExpect, vcardBuilt);
+  await page.select("#kind", "contact");
+  await page.$eval("#contact-name", el => { el.value = "Jane Doe"; });
+  await page.$eval("#contact-phone", el => { el.value = "+15551234567"; });
+  await page.$eval("#contact-email", el => { el.value = "jane@example.com"; });
+  await page.evaluate(() => { document.querySelector("#genMsg").textContent = ""; });
+  await page.click("#gen");
+  await page.waitForFunction(() => /Version/.test(document.querySelector("#genMsg").textContent));
+  let contactSaved = await page.evaluate(() => window.qrgen.codes[window.qrgen.codes.length - 1]?.data);
+  ok("A2 Contact form generates vCard payload", contactSaved === vcardExpect, contactSaved);
+  save("a-contact.png", await page.$eval("#qrImg", e => e.src));
+  await page.select("#kind", "text");
   await page.close();
 
   // ---------- B: mocked artifact window.storage (reported API) ----------

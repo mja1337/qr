@@ -8,7 +8,7 @@ No network calls, no external services, no CDNs.
 
 Env: QR_DB_ENABLED (default true), QR_DB_PATH (default ./data/qrcodes.db), HOST, PORT, QR_MAX_DATA.
 """
-import argparse, base64, html, io, json, os, sys, uuid
+import argparse, base64, html, io, json, os, re, sys, uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -31,6 +31,62 @@ def env_bool(name, default):
 
 def truthy(v):
     return str(v).lower() in ("1", "true", "yes", "on")
+
+
+# ---------------- content payloads (WiFi / vCard) ----------------
+_WIFI_ESCAPE = re.compile(r'([\\;,:"])')
+
+
+def escape_wifi(s):
+    return _WIFI_ESCAPE.sub(r"\\\1", str(s))
+
+
+def build_wifi(ssid, password="", auth="WPA", hidden=False):
+    s = (ssid or "").strip()
+    if not s:
+        raise ValueError("Enter a WiFi network name (SSID)")
+    t = auth if auth in ("WPA", "WEP", "nopass") else "WPA"
+    p = "" if t == "nopass" else (password or "")
+    h = "true" if hidden else "false"
+    return f"WIFI:T:{t};S:{escape_wifi(s)};P:{escape_wifi(p)};H:{h};;"
+
+
+def escape_vcard(s):
+    return str(s).replace("\\", "\\\\").replace("\n", "\\n").replace(",", "\\,").replace(";", "\\;")
+
+
+def build_vcard(name="", phone="", email=""):
+    fn = (name or "").strip()
+    tel = (phone or "").strip()
+    mail = (email or "").strip()
+    if not fn and not tel and not mail:
+        raise ValueError("Enter a name, phone, or email for the contact")
+    lines = ["BEGIN:VCARD", "VERSION:3.0"]
+    if fn:
+        lines.append("FN:" + escape_vcard(fn))
+    if tel:
+        lines.append("TEL:" + escape_vcard(tel))
+    if mail:
+        lines.append("EMAIL:" + escape_vcard(mail))
+    lines.append("END:VCARD")
+    return "\n".join(lines)
+
+
+def payload_from_params(p):
+    """Assemble QR payload from form/API params. kind=wifi|contact builds structured data; else url/data/text."""
+    kind = (p.get("kind") or "text").strip().lower()
+    if kind == "wifi":
+        auth_raw = (p.get("auth") or "WPA").strip()
+        auth = "nopass" if auth_raw.lower() == "nopass" else auth_raw.upper()
+        return build_wifi(
+            p.get("ssid", ""),
+            password=p.get("password", ""),
+            auth=auth,
+            hidden=truthy(p.get("hidden", "")),
+        )
+    if kind == "contact":
+        return build_vcard(name=p.get("name", ""), phone=p.get("phone", ""), email=p.get("email", ""))
+    return p.get("url") or p.get("data") or p.get("text")
 
 
 # ---------------- generator (same logic as qrgen/make_qr.py) ----------------
@@ -149,9 +205,14 @@ h2{font-size:1.15rem;margin:0 0 .75rem}
 label,.field{font-weight:650;color:var(--soft-ink);font-size:.95rem}
 .field{display:flex;flex-direction:column;gap:.4rem;min-width:0}
 .stack{display:flex;flex-direction:column;gap:.4rem;margin-bottom:.85rem}
-input[type=text],select{font:inherit;color:var(--ink);background-color:#fff;border:1.5px solid var(--line);border-radius:999px;padding:.85rem 1.15rem;width:100%;box-shadow:0 8px 18px rgba(86,64,120,.08),inset 0 1px 0 #fff}
+input[type=text],input[type=password],input[type=tel],input[type=email],select{font:inherit;color:var(--ink);background-color:#fff;border:1.5px solid var(--line);border-radius:999px;padding:.85rem 1.15rem;width:100%;box-shadow:0 8px 18px rgba(86,64,120,.08),inset 0 1px 0 #fff}
 select{appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%235c4a84' d='M1.2.8 6 5.6 10.8.8 12 2 6 8 0 2z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 1rem center;padding-right:2.5rem}
+input[type=checkbox]{width:1.15rem;height:1.15rem;accent-color:var(--accent);margin:0}
 .fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem;margin:0 0 .95rem}
+.fields-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem;margin:0 0 .85rem}
+.panel[hidden]{display:none!important}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:.55rem .65rem;margin-bottom:.35rem}
+.check{display:inline-flex;align-items:center;gap:.5rem;font-weight:650}
 button{font:inherit;font-weight:650;color:#fff;background:linear-gradient(180deg,#6a5894 0%,#544278 100%);border:1px solid #4a386e;border-radius:999px;padding:.72rem 1.15rem;cursor:pointer;box-shadow:0 10px 18px rgba(72,48,112,.22),inset 0 1px 0 rgba(255,255,255,.28)}
 :focus-visible{outline:3px solid var(--focus);outline-offset:3px}
 input:focus-visible,select:focus-visible{border-color:var(--accent)}
@@ -163,7 +224,7 @@ table{width:100%;border-collapse:collapse;font-size:.92rem}
 th{text-align:left;font-size:.75rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 td,th{padding:.6rem .45rem;border-bottom:1px solid #f0e8f4;vertical-align:middle;word-break:break-word}
 td img{width:64px;height:64px;background:#fff;border-radius:6px;box-shadow:0 4px 10px rgba(70,50,90,.08);image-rendering:pixelated}
-@media(max-width:700px){.wrap{padding:.85rem .75rem 2.4rem}h1{font-size:1.6rem}.card{padding:1.05rem .95rem;border-radius:22px}.fields{grid-template-columns:1fr}button{width:100%}.logo{width:48px;height:48px}}
+@media(max-width:700px){.wrap{padding:.85rem .75rem 2.4rem}h1{font-size:1.6rem}.card{padding:1.05rem .95rem;border-radius:22px}.fields,.fields-2{grid-template-columns:1fr}button{width:100%}.logo{width:48px;height:48px}}
 @media(forced-colors:active){button,input,select,.card,a.pill{border:1px solid ButtonText}}
 """
 
@@ -198,9 +259,35 @@ def index_html(db_on):
 <p class="eyebrow">Offline · no tracking</p><h1>QR code generator</h1></div></div>
 <p class="lede">Runs on this machine and makes no network calls. Generate opens the PNG or SVG. Use the browser back button to return here.</p></header>
 <section class="card"><h2>Make a code</h2>
-<form action="/qr" method="get">
+<form id="qr-form" action="/qr" method="get">
+<div class="stack"><label for="kind">Content type</label>
+<select id="kind" name="kind">
+<option value="text" selected>Text / URL</option>
+<option value="wifi">WiFi</option>
+<option value="contact">Contact</option>
+</select></div>
+<div id="panel-text" class="panel">
 <div class="stack"><label for="url">URL or text</label>
-<input id="url" type="text" name="url" placeholder="https://example.com/" required autocomplete="off" spellcheck="false"></div>
+<input id="url" type="text" name="url" placeholder="https://example.com/" autocomplete="off" spellcheck="false"></div>
+</div>
+<div id="panel-wifi" class="panel" hidden>
+<div class="stack"><label for="ssid">Network name (SSID)</label>
+<input id="ssid" type="text" name="ssid" placeholder="MyNetwork" autocomplete="off" spellcheck="false"></div>
+<div class="fields-2">
+<label class="field">Security <select id="auth" name="auth"><option value="WPA" selected>WPA / WPA2</option><option value="WEP">WEP</option><option value="nopass">None</option></select></label>
+<label class="field" for="password">Password <input id="password" type="password" name="password" placeholder="Optional if open" autocomplete="off" spellcheck="false"></label>
+</div>
+<div class="row"><label class="check"><input type="checkbox" name="hidden" value="1" id="hidden"> Hidden network</label></div>
+</div>
+<div id="panel-contact" class="panel" hidden>
+<div class="stack"><label for="name">Name</label>
+<input id="name" type="text" name="name" placeholder="Jane Doe" autocomplete="name" spellcheck="false"></div>
+<div class="fields-2">
+<label class="field" for="phone">Phone <input id="phone" type="tel" name="phone" placeholder="+1 555 123 4567" autocomplete="tel"></label>
+<label class="field" for="email">Email <input id="email" type="email" name="email" placeholder="jane@example.com" autocomplete="email" spellcheck="false"></label>
+</div>
+<p class="muted">At least one of name, phone, or email is required. Phones can save the contact from the QR.</p>
+</div>
 <div class="fields">
 <label class="field">Format <select name="format"><option value="png">PNG</option><option value="svg">SVG</option></select></label>
 <label class="field">Size <select name="box"><option value="6">6</option><option value="10" selected>10</option><option value="16">16</option></select></label>
@@ -208,7 +295,19 @@ def index_html(db_on):
 </div>
 <button type="submit">Generate</button></form>{note}</section>
 <nav class="links">{extra}<a class="pill" href="/health">Health</a></nav>
-<p class="fine">"QR Code" is a registered trademark of DENSO WAVE INCORPORATED.</p>""")
+<p class="fine">"QR Code" is a registered trademark of DENSO WAVE INCORPORATED.</p>
+<script>
+(function(){{
+  var kind=document.getElementById("kind");
+  function sync(){{
+    var k=kind.value;
+    document.getElementById("panel-text").hidden=k!=="text";
+    document.getElementById("panel-wifi").hidden=k!=="wifi";
+    document.getElementById("panel-contact").hidden=k!=="contact";
+  }}
+  kind.addEventListener("change",sync); sync();
+}})();
+</script>""")
 
 
 def codes_html(rows):
@@ -262,9 +361,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "database disabled (QR_DB_ENABLED=false)"})
 
     def _qr(self, p):
-        data = p.get("url") or p.get("data") or p.get("text")
         fmt = p.get("format", "png").lower()
         try:
+            data = payload_from_params(p)
             img, ver, opts = make_qr(data, fmt, box=int(p.get("box", 10)), border=int(p.get("border", 4)),
                                      ec=p.get("ec", "M").upper())
         except (ValueError, TypeError) as e:
