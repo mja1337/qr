@@ -95,7 +95,8 @@
   label, .field { font-weight: 650; color: var(--soft-ink); font-size: 0.95rem; }
   .field { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
   .stack { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.85rem; }
-  input[type="text"], select, textarea, input[type="file"] {
+  input[type="text"], input[type="password"], input[type="tel"], input[type="email"],
+  select, textarea, input[type="file"] {
     font: inherit;
     color: var(--ink);
     background-color: #fff;
@@ -153,8 +154,17 @@
   button:active:not(:disabled) { transform: translateY(0); }
   button:disabled { opacity: 0.48; cursor: not-allowed; box-shadow: none; transform: none; }
   :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
-  input[type="text"]:focus-visible, select:focus-visible, textarea:focus-visible, input[type="file"]:focus-visible {
+  input[type="text"]:focus-visible, input[type="password"]:focus-visible,
+  input[type="tel"]:focus-visible, input[type="email"]:focus-visible,
+  select:focus-visible, textarea:focus-visible, input[type="file"]:focus-visible {
     border-color: var(--accent);
+  }
+  .panel[hidden] { display: none !important; }
+  .fields-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin: 0 0 0.85rem;
   }
   .muted { color: var(--muted); font-size: 0.92rem; font-weight: 450; }
   .err { color: var(--err); font-weight: 650; }
@@ -202,7 +212,7 @@
     .wrap { padding: 0.85rem 0.75rem 2.4rem; }
     h1 { font-size: 1.6rem; }
     .card { padding: 1.05rem 0.95rem 1.15rem; border-radius: 22px; }
-    .fields { grid-template-columns: 1fr; }
+    .fields, .fields-2 { grid-template-columns: 1fr; }
     .actions button, #clearAll { width: 100%; }
     .logo { width: 48px; height: 48px; }
     td:last-child { white-space: normal; }
@@ -251,8 +261,54 @@
   <section class="card" id="make" aria-labelledby="make-heading">
     <h2 id="make-heading">Make a code</h2>
     <div class="stack">
-      <label for="data">URL or text</label>
-      <input id="data" type="text" placeholder="https://example.com/" value="" autocomplete="off" spellcheck="false">
+      <label for="kind">Content type</label>
+      <select id="kind">
+        <option value="text" selected>Text / URL</option>
+        <option value="wifi">WiFi</option>
+        <option value="contact">Contact</option>
+      </select>
+    </div>
+    <div id="panel-text" class="panel">
+      <div class="stack">
+        <label for="data">URL or text</label>
+        <input id="data" type="text" placeholder="https://example.com/" value="" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+    <div id="panel-wifi" class="panel" hidden>
+      <div class="stack">
+        <label for="wifi-ssid">Network name (SSID)</label>
+        <input id="wifi-ssid" type="text" placeholder="MyNetwork" value="" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="fields-2">
+        <label class="field">Security
+          <select id="wifi-auth">
+            <option value="WPA" selected>WPA / WPA2</option>
+            <option value="WEP">WEP</option>
+            <option value="nopass">None</option>
+          </select>
+        </label>
+        <label class="field" for="wifi-pass">Password
+          <input id="wifi-pass" type="password" placeholder="Optional if open" value="" autocomplete="off" spellcheck="false">
+        </label>
+      </div>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="wifi-hidden"> Hidden network</label>
+      </div>
+    </div>
+    <div id="panel-contact" class="panel" hidden>
+      <div class="stack">
+        <label for="contact-name">Name</label>
+        <input id="contact-name" type="text" placeholder="Jane Doe" value="" autocomplete="name" spellcheck="false">
+      </div>
+      <div class="fields-2">
+        <label class="field" for="contact-phone">Phone
+          <input id="contact-phone" type="tel" placeholder="+1 555 123 4567" value="" autocomplete="tel">
+        </label>
+        <label class="field" for="contact-email">Email
+          <input id="contact-email" type="email" placeholder="jane@example.com" value="" autocomplete="email" spellcheck="false">
+        </label>
+      </div>
+      <p class="muted">At least one of name, phone, or email is required. Phones can save the contact from the QR.</p>
     </div>
     <div class="fields">
       <label class="field">Format
@@ -2625,6 +2681,59 @@ const CONFIG = {
   MAX_DATA: 2048,
 };
 
+// ======================= content payloads (WiFi / vCard) =======================
+function escapeWifi(s) {
+  return String(s).replace(/([\\;,:"])/g, "\\$1");
+}
+function buildWifi({ ssid, password = "", auth = "WPA", hidden = false } = {}) {
+  const s = String(ssid || "").trim();
+  if (!s) throw new Error("Enter a WiFi network name (SSID)");
+  const t = ["WPA", "WEP", "nopass"].includes(auth) ? auth : "WPA";
+  const p = t === "nopass" ? "" : String(password || "");
+  const h = hidden ? "true" : "false";
+  return `WIFI:T:${t};S:${escapeWifi(s)};P:${escapeWifi(p)};H:${h};;`;
+}
+function escapeVCard(s) {
+  return String(s).replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
+}
+function buildVCard({ name = "", phone = "", email = "" } = {}) {
+  const fn = String(name || "").trim();
+  const tel = String(phone || "").trim();
+  const mail = String(email || "").trim();
+  if (!fn && !tel && !mail) throw new Error("Enter a name, phone, or email for the contact");
+  const lines = ["BEGIN:VCARD", "VERSION:3.0"];
+  if (fn) lines.push("FN:" + escapeVCard(fn));
+  if (tel) lines.push("TEL:" + escapeVCard(tel));
+  if (mail) lines.push("EMAIL:" + escapeVCard(mail));
+  lines.push("END:VCARD");
+  return lines.join("\n");
+}
+function syncKindPanels() {
+  const kind = $("kind").value;
+  $("panel-text").hidden = kind !== "text";
+  $("panel-wifi").hidden = kind !== "wifi";
+  $("panel-contact").hidden = kind !== "contact";
+}
+function payloadFromForm() {
+  const kind = $("kind").value;
+  if (kind === "wifi") {
+    return buildWifi({
+      ssid: $("wifi-ssid").value,
+      password: $("wifi-pass").value,
+      auth: $("wifi-auth").value,
+      hidden: $("wifi-hidden").checked,
+    });
+  }
+  if (kind === "contact") {
+    return buildVCard({
+      name: $("contact-name").value,
+      phone: $("contact-phone").value,
+      email: $("contact-email").value,
+    });
+  }
+  return $("data").value.trim();
+}
+
 // ======================= QR rendering =======================
 qrcode.stringToBytes = qrcode.stringToBytesFuncs["UTF-8"];
 function encode(data, ec) {
@@ -2777,10 +2886,12 @@ async function importDoc(doc) {
 
 // ======================= wiring =======================
 $("dbOn").checked = dbOn;
+$("kind").onchange = syncKindPanels;
+syncKindPanels();
 $("gen").onclick = async () => {
   $("genMsg").className = "muted";
   try {
-    const data = $("data").value.trim(), format = $("format").value, o = opts();
+    const data = payloadFromForm(), format = $("format").value, o = opts();
     const img = render(data, format, o);
     current = { data, format, opts: o, ...img };
     $("preview").innerHTML = `<p><img id="qrImg" alt="QR code" src="${img.dataUrl}"></p>`;
@@ -2817,7 +2928,11 @@ $("importBtn").onclick = () => doImport($("jsonBox").value);
 $("importFile").onchange = async e => { const f = e.target.files[0]; if (f) doImport(await f.text()); e.target.value = ""; };
 
 // small hook for automated tests; harmless otherwise
-window.qrgen = { CONFIG, Storage, exportDoc, importDoc, render, get codes() { return codes; } };
+window.qrgen = {
+  CONFIG, Storage, exportDoc, importDoc, render, payloadFromForm,
+  escapeWifi, buildWifi, escapeVCard, buildVCard, syncKindPanels,
+  get codes() { return codes; },
+};
 
 (async () => { await load(); renderList(); })();
 
