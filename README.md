@@ -35,9 +35,9 @@ Open `index.html` in a browser. A double-click is enough. It works from a `file:
 
 After Pages is enabled, the same page is at <https://mja1337.github.io/qr/>.
 
-Choose a content type — **Text / URL**, **WiFi** (SSID, password, security, optional hidden network), or **Contact** (name, phone, email as a vCard phones can save) — fill the fields, choose format, size, and error correction, then **Generate**. **Download PNG** and **Download SVG** use the last code you generated. Leave **Save generated codes** on to keep a list in this browser, or turn it off and nothing is read or written. **Download export.json**, **Copy JSON**, and **Show JSON** export that list. **Include images (base64)** adds the picture data. Paste JSON into the box, or choose a file, then **Import JSON from box below**. Import merges by id and skips duplicates.
+Choose a content type — **Text / URL**, **WiFi** (SSID, password, security, optional hidden network), or **Contact** (name, phone, email as a vCard phones can save) — then set format, size, and error correction (L–H; higher recovers more damage but denser codes). Optionally set module/background colours and a centre logo (upload, or an unofficial lettermark preset). A logo forces error correction to **H**. Preset tiles are not official brand logos. Then **Generate**. **Download PNG** and **Download SVG** use the last code you generated. Leave **Save generated codes** on to keep a list in this browser, or turn it off and nothing is read or written. **Download export.json**, **Copy JSON**, and **Show JSON** export that list. **Include images (base64)** adds the picture data. Paste JSON into the box, or choose a file, then **Import JSON from box below**. Import merges by id and skips duplicates.
 
-A saved row stores the text and options (format, module size, quiet zone, error correction), plus version, time, and byte size. The picture is drawn again when you export or display it.
+A saved row stores the text and options (format, module size, quiet zone, error correction, colours, optional logo), plus version, time, and byte size. The picture is drawn again when you export or display it.
 
 ## Run the Python server
 
@@ -82,7 +82,7 @@ QR_DB_ENABLED=false .venv/bin/python app.py serve
 | Route | What it does |
 |---|---|
 | `GET /` | HTML form |
-| `GET` or `POST /qr` | The image. Parameters: `url` (or `data` or `text`), or `kind=wifi` with `ssid`, `password`, `auth` (`WPA`/`WEP`/`nopass`), `hidden=1`, or `kind=contact` with `name`, `phone`, `email`; plus `format=png` or `svg`, `box` (1–50, default 10), `border` (4–20, default 4), `ec` (`L`, `M`, `Q`, or `H`), `nostore=1`. POST accepts a form body or JSON. Response headers: `X-QR-Id` when a row is stored, `X-QR-Version`, `X-QR-EC`. |
+| `GET` or `POST /qr` | The image. Parameters: `url` (or `data` or `text`), or `kind=wifi` with `ssid`, `password`, `auth` (`WPA`/`WEP`/`nopass`), `hidden=1`, or `kind=contact` with `name`, `phone`, `email`; plus `format=png` or `svg`, `box` (1–50, default 10), `border` (4–20, default 4), `ec` (`L`, `M`, `Q`, or `H`), `fg` / `bg` (`#rrggbb`), `nostore=1`. Centre logos are on the static web page only. POST accepts a form body or JSON. Response headers: `X-QR-Id` when a row is stored, `X-QR-Version`, `X-QR-EC`. |
 | `GET /health` | `{"status":"ok","db":"sqlite"}` or `"disabled"` |
 | `GET /codes` | JSON list (`?limit=`). Browsers, or `?view=html`, get an HTML table. `/codes.json` is always JSON. |
 | `GET /codes/<id>` | The stored image |

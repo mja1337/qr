@@ -90,8 +90,20 @@ def payload_from_params(p):
 
 
 # ---------------- generator (same logic as qrgen/make_qr.py) ----------------
-def make_qr(data, fmt="png", box=10, border=4, ec="M"):
-    """Return (bytes, qr_version, options). Black modules on white."""
+_HEX = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def parse_hex_color(s, fallback):
+    t = (s or "").strip()
+    if not _HEX.match(t):
+        return fallback
+    if len(t) == 4:
+        return ("#" + t[1] * 2 + t[2] * 2 + t[3] * 2).lower()
+    return t.lower()
+
+
+def make_qr(data, fmt="png", box=10, border=4, ec="M", fg="#000000", bg="#ffffff"):
+    """Return (bytes, qr_version, options)."""
     if fmt not in MIME:
         raise ValueError("format must be png or svg")
     if ec not in EC:
@@ -100,16 +112,30 @@ def make_qr(data, fmt="png", box=10, border=4, ec="M"):
         raise ValueError("box must be 1-50, border 4-20 (quiet zone kept >= 4 modules)")
     if not data or len(data) > MAX_DATA:
         raise ValueError(f"data must be 1-{MAX_DATA} chars")
+    fg = parse_hex_color(fg, "#000000")
+    bg = parse_hex_color(bg, "#ffffff")
     qr = qrcode.QRCode(error_correction=EC[ec], box_size=box, border=border)
     qr.add_data(data)
     qr.make(fit=True)
     if fmt == "svg":
+        # SvgPathImage draws modules only; recolour the path and inject a background.
         img = qr.make_image(image_factory=qrcode.image.svg.SvgPathImage)
-    else:
-        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf)
+        svg = buf.getvalue().decode("utf-8")
+        svg = svg.replace('fill="#000000"', f'fill="{fg}"', 1)
+        if f'fill="{bg}"' not in svg[: svg.find("<path")]:
+            svg = re.sub(
+                r"(<svg\b[^>]*>)",
+                rf'\1<rect width="100%" height="100%" fill="{bg}"/>',
+                svg,
+                count=1,
+            )
+        return svg.encode("utf-8"), qr.version, {"box": box, "border": border, "ec": ec, "fg": fg, "bg": bg}
+    img = qr.make_image(fill_color=fg, back_color=bg)
     buf = io.BytesIO()
     img.save(buf)
-    return buf.getvalue(), qr.version, {"box": box, "border": border, "ec": ec}
+    return buf.getvalue(), qr.version, {"box": box, "border": border, "ec": ec, "fg": fg, "bg": bg}
 
 
 # ---------------- local SQLite store (imported only when enabled) ----------------
@@ -206,6 +232,7 @@ label,.field{font-weight:650;color:var(--soft-ink);font-size:.95rem}
 .field{display:flex;flex-direction:column;gap:.4rem;min-width:0}
 .stack{display:flex;flex-direction:column;gap:.4rem;margin-bottom:.85rem}
 input[type=text],input[type=password],input[type=tel],input[type=email],select{font:inherit;color:var(--ink);background-color:#fff;border:1.5px solid var(--line);border-radius:999px;padding:.85rem 1.15rem;width:100%;box-shadow:0 8px 18px rgba(86,64,120,.08),inset 0 1px 0 #fff}
+input[type=color]{font:inherit;width:100%;height:3.1rem;padding:.35rem .5rem;border:1.5px solid var(--line);border-radius:999px;background:#fff;box-shadow:0 8px 18px rgba(86,64,120,.08),inset 0 1px 0 #fff;cursor:pointer}
 select{appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%235c4a84' d='M1.2.8 6 5.6 10.8.8 12 2 6 8 0 2z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 1rem center;padding-right:2.5rem}
 input[type=checkbox]{width:1.15rem;height:1.15rem;accent-color:var(--accent);margin:0}
 .fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem;margin:0 0 .95rem}
@@ -291,7 +318,12 @@ def index_html(db_on):
 <div class="fields">
 <label class="field">Format <select name="format"><option value="png">PNG</option><option value="svg">SVG</option></select></label>
 <label class="field">Size <select name="box"><option value="6">6</option><option value="10" selected>10</option><option value="16">16</option></select></label>
-<label class="field">Error correction <select name="ec"><option value="L">L</option><option value="M" selected>M</option><option value="Q">Q</option><option value="H">H</option></select></label>
+<label class="field">Error correction <select name="ec"><option value="L">L · ~7%</option><option value="M" selected>M · ~15%</option><option value="Q">Q · ~25%</option><option value="H">H · ~30%</option></select></label>
+</div>
+<p class="muted">Higher error correction survives damage better, but makes a denser code. Centre logos are available on the offline web page.</p>
+<div class="fields-2">
+<label class="field" for="fg">Module colour <input id="fg" type="color" name="fg" value="#000000"></label>
+<label class="field" for="bg">Background <input id="bg" type="color" name="bg" value="#ffffff"></label>
 </div>
 <button type="submit">Generate</button></form>{note}</section>
 <nav class="links">{extra}<a class="pill" href="/health">Health</a></nav>
@@ -364,8 +396,10 @@ class Handler(BaseHTTPRequestHandler):
         fmt = p.get("format", "png").lower()
         try:
             data = payload_from_params(p)
-            img, ver, opts = make_qr(data, fmt, box=int(p.get("box", 10)), border=int(p.get("border", 4)),
-                                     ec=p.get("ec", "M").upper())
+            img, ver, opts = make_qr(
+                data, fmt, box=int(p.get("box", 10)), border=int(p.get("border", 4)),
+                ec=p.get("ec", "M").upper(), fg=p.get("fg", "#000000"), bg=p.get("bg", "#ffffff"),
+            )
         except (ValueError, TypeError) as e:
             return self._send(400, {"error": str(e)})
         extra = {"X-QR-Version": str(ver), "X-QR-EC": opts["ec"]}
