@@ -106,6 +106,17 @@
     box-shadow: var(--pill);
     width: 100%;
   }
+  input[type="color"] {
+    font: inherit;
+    width: 100%;
+    height: 3.1rem;
+    padding: 0.35rem 0.5rem;
+    border: 1.5px solid var(--line);
+    border-radius: 999px;
+    background: #fff;
+    box-shadow: var(--pill);
+    cursor: pointer;
+  }
   textarea {
     border-radius: 24px;
     min-height: 11rem;
@@ -156,8 +167,27 @@
   :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
   input[type="text"]:focus-visible, input[type="password"]:focus-visible,
   input[type="tel"]:focus-visible, input[type="email"]:focus-visible,
+  input[type="color"]:focus-visible,
   select:focus-visible, textarea:focus-visible, input[type="file"]:focus-visible {
     border-color: var(--accent);
+  }
+  .logo-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem; margin: 0.15rem 0 0.5rem; }
+  .logo-preview {
+    width: 48px; height: 48px; object-fit: contain; border-radius: 12px;
+    background: #fff; border: 1.5px solid var(--line); display: none;
+  }
+  .logo-preview.show { display: block; }
+  .logo-presets { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.35rem 0 0.55rem; }
+  .logo-presets button {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.4rem 0.7rem; font-size: 0.88rem;
+  }
+  .logo-presets button img {
+    width: 22px; height: 22px; border-radius: 6px; object-fit: cover;
+  }
+  .logo-presets button[aria-pressed="true"] {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(109, 78, 163, 0.25);
   }
   .panel[hidden] { display: none !important; }
   .fields-2 {
@@ -184,6 +214,7 @@
   .preview-empty { margin: 0; text-align: center; color: var(--muted); }
   #preview p { margin: 0; padding: 0.7rem; background: #fff; border-radius: 22px; box-shadow: 0 12px 28px rgba(70, 50, 90, 0.1); }
   #preview img { display: block; max-width: min(100%, 320px); height: auto; image-rendering: pixelated; }
+  #preview img.has-logo { image-rendering: auto; }
   .table-wrap { overflow-x: auto; margin: 0.4rem 0 0.85rem; border-radius: 18px; }
   table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
   th {
@@ -255,7 +286,7 @@
         <h1>QR code generator</h1>
       </div>
     </div>
-    <p class="lede">Runs entirely in this page. It makes no network calls and it does not track you. Codes are plain black on white with a 4-module quiet zone.</p>
+    <p class="lede">Runs entirely in this page. It makes no network calls and it does not track you. Codes keep a 4-module quiet zone; you can set colours and an optional centre logo.</p>
   </header>
 
   <section class="card" id="make" aria-labelledby="make-heading">
@@ -318,8 +349,36 @@
         <select id="box"><option>4</option><option>6</option><option selected>10</option><option>16</option></select>
       </label>
       <label class="field">Error correction
-        <select id="ec"><option>L</option><option selected>M</option><option>Q</option><option>H</option></select>
+        <select id="ec">
+          <option value="L">L · ~7% recovery</option>
+          <option value="M" selected>M · ~15% recovery</option>
+          <option value="Q">Q · ~25% recovery</option>
+          <option value="H">H · ~30% recovery</option>
+        </select>
       </label>
+    </div>
+    <p id="ecHint" class="muted">Higher error correction survives damage and logos better, but makes a denser code for the same text.</p>
+    <div class="fields-2">
+      <label class="field" for="fg">Module colour
+        <input id="fg" type="color" value="#000000">
+      </label>
+      <label class="field" for="bg">Background
+        <input id="bg" type="color" value="#ffffff">
+      </label>
+    </div>
+    <p id="contrastHint" class="muted" role="status"></p>
+    <div class="stack">
+      <span id="logo-label">Centre logo (optional)</span>
+      <div class="logo-presets" id="logoPresets" role="group" aria-labelledby="logo-label"></div>
+      <p class="muted">Preset tiles are unofficial lettermarks for layout testing — not affiliated with those brands. Upload an official logo yourself if you have rights to use it.</p>
+      <div class="logo-row">
+        <label class="file" for="logoFile" style="margin:0">Upload image
+          <input type="file" id="logoFile" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml">
+        </label>
+        <button id="logoClear" type="button" disabled>Clear logo</button>
+        <img id="logoPreview" class="logo-preview" alt="">
+      </div>
+      <p id="logoEcNote" class="muted" hidden>A centre logo forces error correction to H (~30%) so scanners can still read the code. Keep the logo small and simple.</p>
     </div>
     <div class="actions">
       <button id="gen" class="primary" type="button">Generate</button>
@@ -382,6 +441,11 @@ const CONFIG = {
   MAX_VALUE_CHARS: 4500000,     // stay under the reported ~5 MB per-value limit (unconfirmed); 20 MB per artifact is documented
   QUIET_ZONE: 4,
   MAX_DATA: 2048,
+  LOGO_MAX_FRAC: 0.2,           // centre logo size vs module grid
+  LOGO_MAX_BYTES: 180000,       // upload size before base64
+  DEFAULT_FG: "#000000",
+  DEFAULT_BG: "#ffffff",
+  MIN_CONTRAST: 3,
 };
 
 // ======================= content payloads (WiFi / vCard) =======================
@@ -437,6 +501,104 @@ function payloadFromForm() {
   return $("data").value.trim();
 }
 
+// ======================= colours, logo, presets =======================
+function parseHexColor(s, fallback) {
+  const t = String(s || "").trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(t)) return t.toLowerCase();
+  if (/^#[0-9a-fA-F]{3}$/.test(t)) {
+    const r = t[1], g = t[2], b = t[3];
+    return ("#" + r + r + g + g + b + b).toLowerCase();
+  }
+  return fallback;
+}
+function srgbChan(c) { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+function relativeLuminance(hex) {
+  const h = parseHexColor(hex, "#000000").slice(1);
+  return 0.2126 * srgbChan(parseInt(h.slice(0, 2), 16))
+       + 0.7152 * srgbChan(parseInt(h.slice(2, 4), 16))
+       + 0.0722 * srgbChan(parseInt(h.slice(4, 6), 16));
+}
+function contrastRatio(a, b) {
+  const L1 = relativeLuminance(a), L2 = relativeLuminance(b);
+  const hi = Math.max(L1, L2), lo = Math.min(L1, L2);
+  return (hi + 0.05) / (lo + 0.05);
+}
+function escAttr(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+/** Unofficial lettermark tiles — not brand logos. */
+function lettermarkSvg(bg, fg, label, fontSize) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">` +
+    `<rect width="128" height="128" rx="28" fill="${bg}"/>` +
+    `<text x="64" y="78" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-weight="750" font-size="${fontSize}" fill="${fg}">${label}</text>` +
+    `</svg>`;
+}
+function svgDataUrl(svg) {
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+}
+const LOGO_PRESETS = [
+  { id: "facebook", label: "Facebook", dataUrl: svgDataUrl(lettermarkSvg("#1877f2", "#ffffff", "Fb", 42)) },
+  { id: "instagram", label: "Instagram", dataUrl: svgDataUrl(lettermarkSvg("#e1306c", "#ffffff", "Ig", 42)) },
+  { id: "snapchat", label: "Snapchat", dataUrl: svgDataUrl(lettermarkSvg("#fffc00", "#111111", "Sc", 42)) },
+  { id: "linkedin", label: "LinkedIn", dataUrl: svgDataUrl(lettermarkSvg("#0a66c2", "#ffffff", "in", 44)) },
+  { id: "bitcoin", label: "Bitcoin", dataUrl: svgDataUrl(lettermarkSvg("#f7931a", "#ffffff", "₿", 52)) },
+  { id: "x", label: "X / Twitter", dataUrl: svgDataUrl(lettermarkSvg("#111111", "#ffffff", "X", 48)) },
+];
+const logoState = { dataUrl: null, img: null, presetId: null };
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Could not load logo image"));
+    img.src = url;
+  });
+}
+async function setLogo(dataUrl, presetId) {
+  if (!dataUrl) {
+    logoState.dataUrl = null; logoState.img = null; logoState.presetId = null;
+  } else {
+    logoState.img = await loadImage(dataUrl);
+    logoState.dataUrl = dataUrl;
+    logoState.presetId = presetId || null;
+  }
+  syncLogoUi();
+}
+function syncLogoUi() {
+  const has = !!logoState.dataUrl;
+  $("logoClear").disabled = !has;
+  $("logoEcNote").hidden = !has;
+  const prev = $("logoPreview");
+  if (has) { prev.src = logoState.dataUrl; prev.classList.add("show"); }
+  else { prev.removeAttribute("src"); prev.classList.remove("show"); }
+  $("ec").disabled = has;
+  if (has) $("ec").value = "H";
+  document.querySelectorAll("#logoPresets button").forEach(btn => {
+    btn.setAttribute("aria-pressed", btn.dataset.preset === logoState.presetId ? "true" : "false");
+  });
+  updateContrastHint();
+}
+function updateContrastHint() {
+  const fg = parseHexColor($("fg").value, CONFIG.DEFAULT_FG);
+  const bg = parseHexColor($("bg").value, CONFIG.DEFAULT_BG);
+  const ratio = contrastRatio(fg, bg);
+  const el = $("contrastHint");
+  if (ratio < CONFIG.MIN_CONTRAST) {
+    el.textContent = `Low contrast (${ratio.toFixed(1)}:1). Scanners often fail — use a dark module colour on a light background.`;
+    el.className = "err";
+  } else {
+    el.textContent = `Contrast ${ratio.toFixed(1)}:1. Dark-on-light scans most reliably.`;
+    el.className = "muted";
+  }
+}
+function logoSlot(n, box, border) {
+  let modules = Math.max(5, Math.floor(n * CONFIG.LOGO_MAX_FRAC));
+  if (modules % 2 === 0) modules += 1;
+  const size = modules * box;
+  const total = (n + 2 * border) * box;
+  const x = Math.floor((total - size) / 2);
+  return { x, y: x, size, modules };
+}
+
 // ======================= QR rendering =======================
 qrcode.stringToBytes = qrcode.stringToBytesFuncs["UTF-8"];
 function encode(data, ec) {
@@ -446,32 +608,68 @@ function encode(data, ec) {
   return qr;
 }
 function versionOf(qr) { return (qr.getModuleCount() - 17) / 4; }
-function toSvg(qr, box, border) {
+function toSvg(qr, box, border, fg, bg, logoUrl) {
   const n = qr.getModuleCount(), total = n + 2 * border;
   let d = "";
   for (let r = 0; r < n; r++) for (let c = 0; c < n; c++)
     if (qr.isDark(r, c)) d += `M${c + border} ${r + border}h1v1h-1z`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${total * box}" height="${total * box}" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path fill="#000" d="${d}"/></svg>`;
+  let logo = "";
+  if (logoUrl) {
+    const slot = logoSlot(n, 1, border);
+    const pad = 0.45;
+    logo = `<rect x="${slot.x - pad}" y="${slot.y - pad}" width="${slot.size + 2 * pad}" height="${slot.size + 2 * pad}" rx="0.35" fill="${bg}"/>` +
+      `<image href="${escAttr(logoUrl)}" x="${slot.x}" y="${slot.y}" width="${slot.size}" height="${slot.size}" preserveAspectRatio="xMidYMid meet"/>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${total * box}" height="${total * box}" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="${bg}"/><path fill="${fg}" d="${d}"/>${logo}</svg>`;
 }
-function toPngDataUrl(qr, box, border) {
+function toPngDataUrl(qr, box, border, fg, bg, logoImg) {
   const n = qr.getModuleCount(), size = (n + 2 * border) * box;
   const cv = document.createElement("canvas"); cv.width = cv.height = size;
   const g = cv.getContext("2d");
-  g.fillStyle = "#fff"; g.fillRect(0, 0, size, size); g.fillStyle = "#000";
+  g.fillStyle = bg; g.fillRect(0, 0, size, size); g.fillStyle = fg;
   for (let r = 0; r < n; r++) for (let c = 0; c < n; c++)
     if (qr.isDark(r, c)) g.fillRect((c + border) * box, (r + border) * box, box, box);
+  if (logoImg && logoImg.complete && logoImg.naturalWidth) {
+    const slot = logoSlot(n, box, border);
+    const pad = Math.max(2, Math.floor(box * 0.45));
+    g.fillStyle = bg;
+    g.fillRect(slot.x - pad, slot.y - pad, slot.size + 2 * pad, slot.size + 2 * pad);
+    const ir = logoImg.naturalWidth / logoImg.naturalHeight;
+    let dw = slot.size, dh = slot.size, dx = slot.x, dy = slot.y;
+    if (ir > 1) { dh = slot.size / ir; dy = slot.y + (slot.size - dh) / 2; }
+    else if (ir < 1) { dw = slot.size * ir; dx = slot.x + (slot.size - dw) / 2; }
+    g.drawImage(logoImg, dx, dy, dw, dh);
+  }
   return cv.toDataURL("image/png");
 }
 const b64ToBytesLen = b64 => Math.floor(b64.length * 3 / 4) - (b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0);
 const utf8b64 = s => btoa(unescape(encodeURIComponent(s)));
-// Returns {mime, base64, dataUrl, version, bytes}
-function render(data, format, opts) {
+function normalizeOpts(opts) {
+  const o = Object.assign({}, opts);
+  o.fg = parseHexColor(o.fg, CONFIG.DEFAULT_FG);
+  o.bg = parseHexColor(o.bg, CONFIG.DEFAULT_BG);
+  o.box = Math.min(50, Math.max(1, +o.box || 10));
+  o.border = Math.max(4, +o.border || CONFIG.QUIET_ZONE);
+  o.ec = "LMQH".includes(o.ec) && o.ec ? o.ec : "M";
+  if (o.logo) o.ec = "H";
+  return o;
+}
+// Returns {mime, base64, dataUrl, version, bytes}. logoImg optional for PNG.
+function render(data, format, opts, logoImg) {
   if (!data || data.length > CONFIG.MAX_DATA) throw new Error(`Enter 1-${CONFIG.MAX_DATA} characters`);
-  const qr = encode(data, opts.ec);
+  const o = normalizeOpts(opts);
+  const qr = encode(data, o.ec);
+  const img = logoImg || (o.logo && logoState.dataUrl === o.logo ? logoState.img : null);
   let mime, base64;
-  if (format === "svg") { mime = "image/svg+xml"; base64 = utf8b64(toSvg(qr, opts.box, opts.border)); }
-  else { mime = "image/png"; base64 = toPngDataUrl(qr, opts.box, opts.border).split(",")[1]; }
-  return { mime, base64, dataUrl: `data:${mime};base64,${base64}`, version: versionOf(qr), bytes: b64ToBytesLen(base64) };
+  if (format === "svg") { mime = "image/svg+xml"; base64 = utf8b64(toSvg(qr, o.box, o.border, o.fg, o.bg, o.logo || null)); }
+  else { mime = "image/png"; base64 = toPngDataUrl(qr, o.box, o.border, o.fg, o.bg, img).split(",")[1]; }
+  return { mime, base64, dataUrl: `data:${mime};base64,${base64}`, version: versionOf(qr), bytes: b64ToBytesLen(base64), ec: o.ec };
+}
+async function renderAsync(data, format, opts) {
+  const o = normalizeOpts(opts);
+  let img = null;
+  if (o.logo && format === "png") img = await loadImage(o.logo);
+  return render(data, format, o, img);
 }
 
 // ======================= storage adapter =======================
@@ -518,8 +716,22 @@ async function save() {
   await Storage.set(CONFIG.STORAGE_KEY, JSON.stringify({ schema: 1, codes }));
 }
 const newId = () => { const a = new Uint8Array(6); crypto.getRandomValues(a); return [...a].map(b => b.toString(16).padStart(2, "0")).join(""); };
-const opts = () => ({ box: +$("box").value, border: CONFIG.QUIET_ZONE, ec: $("ec").value });
+function opts() {
+  const o = {
+    box: +$("box").value,
+    border: CONFIG.QUIET_ZONE,
+    ec: logoState.dataUrl ? "H" : $("ec").value,
+    fg: parseHexColor($("fg").value, CONFIG.DEFAULT_FG),
+    bg: parseHexColor($("bg").value, CONFIG.DEFAULT_BG),
+  };
+  if (logoState.dataUrl) o.logo = logoState.dataUrl;
+  return o;
+}
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function optionsSummary(o) {
+  const { logo, ...rest } = o || {};
+  return Object.assign({}, rest, logo ? { logo: "[embedded]" } : {});
+}
 
 function renderList() {
   $("backend").textContent = dbOn ? Storage.backend : "off";
@@ -530,7 +742,7 @@ function renderList() {
   tb.innerHTML = codes.slice().reverse().map(c => {
     const thumb = render(c.data, "svg", { ...c.options, box: 2 }).dataUrl;
     return `<tr data-id="${c.id}"><td><img src="${thumb}" width="56" height="56" alt=""></td><td>${esc(c.data)}</td><td>${c.format}</td>
-      <td>${esc(JSON.stringify(c.options))}</td><td>${c.created_at}</td>
+      <td>${esc(JSON.stringify(optionsSummary(c.options)))}</td><td>${c.created_at}</td>
       <td><button data-act="dl">Download</button><button data-act="del">Delete</button></td></tr>`;
   }).join("");
 }
@@ -552,21 +764,31 @@ async function copyText(t) {
 }
 
 // ======================= export / import =======================
-function exportDoc(includeImages) {
+async function exportDoc(includeImages) {
+  const out = [];
+  for (const c of codes) {
+    const row = { id: c.id, data: c.data, format: c.format, options: c.options, version: c.version, created_at: c.created_at, bytes: c.bytes };
+    if (includeImages) row.image_base64 = (await renderAsync(c.data, c.format, c.options)).base64;
+    out.push(row);
+  }
   return {
     exported_at: new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00"),
     count: codes.length,
     include_images: includeImages,
     source: "qrgen-artifact",
-    codes: codes.map(c => {
-      const row = { id: c.id, data: c.data, format: c.format, options: c.options, version: c.version, created_at: c.created_at, bytes: c.bytes };
-      if (includeImages) row.image_base64 = render(c.data, c.format, c.options).base64;
-      return row;
-    }),
+    codes: out,
   };
 }
 function validRow(r) {
   return r && typeof r.data === "string" && r.data.length && r.data.length <= CONFIG.MAX_DATA && (r.format === "png" || r.format === "svg");
+}
+function normalizeStoredOptions(o) {
+  const options = normalizeOpts({
+    box: o.box, border: o.border, ec: o.ec,
+    fg: o.fg, bg: o.bg, logo: typeof o.logo === "string" && o.logo.indexOf("data:image/") === 0 ? o.logo : undefined,
+  });
+  if (!options.logo) delete options.logo;
+  return options;
 }
 async function importDoc(doc) {
   if (!dbOn) throw new Error("Saving is off; turn it on to import.");
@@ -575,11 +797,10 @@ async function importDoc(doc) {
   const have = new Set(codes.map(c => c.id)); let added = 0, skipped = 0;
   for (const r of rows) {
     if (!validRow(r)) { skipped++; continue; }
-    const o = r.options || {};
-    const options = { box: Math.min(50, Math.max(1, +o.box || 10)), border: Math.max(4, +o.border || 4), ec: "LMQH".includes(o.ec) && o.ec ? o.ec : "M" };
+    const options = normalizeStoredOptions(r.options || {});
     const id = typeof r.id === "string" && /^[0-9a-f]{6,32}$/.test(r.id) ? r.id : newId();
     if (have.has(id)) { skipped++; continue; }
-    const img = render(r.data, r.format, options);   // recompute version/bytes; image_base64 in the file is ignored
+    const img = await renderAsync(r.data, r.format, options);   // recompute version/bytes; image_base64 in the file is ignored
     codes.push({ id, data: r.data, format: r.format, options, version: img.version, created_at: r.created_at || new Date().toISOString(), bytes: img.bytes });
     have.add(id); added++;
   }
@@ -591,15 +812,53 @@ async function importDoc(doc) {
 $("dbOn").checked = dbOn;
 $("kind").onchange = syncKindPanels;
 syncKindPanels();
+(function buildLogoPresets() {
+  const wrap = $("logoPresets");
+  LOGO_PRESETS.forEach(p => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.preset = p.id;
+    btn.setAttribute("aria-pressed", "false");
+    btn.title = p.label + " (unofficial template)";
+    btn.innerHTML = `<img src="${escAttr(p.dataUrl)}" alt="">${esc(p.label)}`;
+    btn.onclick = async () => {
+      try { await setLogo(p.dataUrl, p.id); $("logoFile").value = ""; }
+      catch (e) { $("genMsg").textContent = e.message; $("genMsg").className = "err"; }
+    };
+    wrap.appendChild(btn);
+  });
+})();
+$("fg").oninput = $("bg").oninput = updateContrastHint;
+updateContrastHint();
+$("logoClear").onclick = async () => { await setLogo(null); $("logoFile").value = ""; };
+$("logoFile").onchange = async e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  try {
+    if (f.size > CONFIG.LOGO_MAX_BYTES) throw new Error(`Logo must be under ${Math.round(CONFIG.LOGO_MAX_BYTES / 1000)} KB`);
+    const dataUrl = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(new Error("Could not read logo file"));
+      r.readAsDataURL(f);
+    });
+    await setLogo(dataUrl, null);
+  } catch (err) {
+    $("genMsg").textContent = err.message; $("genMsg").className = "err";
+    e.target.value = "";
+  }
+};
 $("gen").onclick = async () => {
   $("genMsg").className = "muted";
   try {
     const data = payloadFromForm(), format = $("format").value, o = opts();
-    const img = render(data, format, o);
+    const img = await renderAsync(data, format, o);
     current = { data, format, opts: o, ...img };
-    $("preview").innerHTML = `<p><img id="qrImg" alt="QR code" src="${img.dataUrl}"></p>`;
+    const logoClass = o.logo ? " has-logo" : "";
+    $("preview").innerHTML = `<p><img id="qrImg" class="${logoClass.trim()}" alt="QR code" src="${img.dataUrl}"></p>`;
     $("dlPng").disabled = $("dlSvg").disabled = false;
-    let msg = `Version ${img.version}, EC ${o.ec}, ${img.bytes} bytes`;
+    let msg = `Version ${img.version}, EC ${img.ec || o.ec}, ${img.bytes} bytes`;
+    if (o.logo) msg += " · logo";
     if (dbOn) {
       const rec = { id: newId(), data, format, options: o, version: img.version, created_at: new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00"), bytes: img.bytes };
       codes.push(rec);
@@ -609,20 +868,31 @@ $("gen").onclick = async () => {
     $("genMsg").textContent = msg;
   } catch (e) { $("genMsg").textContent = e.message; $("genMsg").className = "err"; }
 };
-$("dlPng").onclick = () => { if (!current) return; const r = render(current.data, "png", current.opts); download("qr.png", "image/png", r.base64, true); };
-$("dlSvg").onclick = () => { if (!current) return; const r = render(current.data, "svg", current.opts); download("qr.svg", "image/svg+xml", r.base64, true); };
+$("dlPng").onclick = async () => {
+  if (!current) return;
+  const r = await renderAsync(current.data, "png", current.opts);
+  download("qr.png", "image/png", r.base64, true);
+};
+$("dlSvg").onclick = async () => {
+  if (!current) return;
+  const r = await renderAsync(current.data, "svg", current.opts);
+  download("qr.svg", "image/svg+xml", r.base64, true);
+};
 $("dbOn").onchange = async e => { dbOn = e.target.checked; await load(); renderList(); };
 $("codes").onclick = async e => {
   const btn = e.target.closest("button"); if (!btn) return;
   const id = btn.closest("tr").dataset.id, c = codes.find(x => x.id === id); if (!c) return;
-  if (btn.dataset.act === "dl") { const r = render(c.data, c.format, c.options); download(`qr-${c.id}.${c.format}`, r.mime, r.base64, true); }
+  if (btn.dataset.act === "dl") {
+    const r = await renderAsync(c.data, c.format, c.options);
+    download(`qr-${c.id}.${c.format}`, r.mime, r.base64, true);
+  }
   if (btn.dataset.act === "del") { codes = codes.filter(x => x.id !== id); await save(); renderList(); }
 };
 $("clearAll").onclick = async () => { if (!confirm(`Delete all ${codes.length} saved codes?`)) return; codes = []; await save(); renderList(); };
-const exportText = () => JSON.stringify(exportDoc($("incImg").checked), null, 2);
-$("dlJson").onclick = () => { const t = exportText(); $("jsonBox").value = t; download("export.json", "application/json", t, false); $("ioMsg").textContent = `export.json: ${codes.length} codes`; };
-$("copyJson").onclick = async () => { const t = exportText(); $("ioMsg").textContent = (await copyText(t)) ? `Copied ${codes.length} codes to the clipboard` : "Clipboard blocked: the JSON is in the box below, copy it manually"; $("jsonBox").value = t; };
-$("showJson").onclick = () => { $("jsonBox").value = exportText(); };
+const exportText = async () => JSON.stringify(await exportDoc($("incImg").checked), null, 2);
+$("dlJson").onclick = async () => { const t = await exportText(); $("jsonBox").value = t; download("export.json", "application/json", t, false); $("ioMsg").textContent = `export.json: ${codes.length} codes`; };
+$("copyJson").onclick = async () => { const t = await exportText(); $("ioMsg").textContent = (await copyText(t)) ? `Copied ${codes.length} codes to the clipboard` : "Clipboard blocked: the JSON is in the box below, copy it manually"; $("jsonBox").value = t; };
+$("showJson").onclick = async () => { $("jsonBox").value = await exportText(); };
 async function doImport(text) {
   try { const r = await importDoc(JSON.parse(text)); renderList(); $("ioMsg").textContent = `Imported ${r.added}, skipped ${r.skipped}`; $("ioMsg").className = "ok"; }
   catch (e) { $("ioMsg").textContent = "Import failed: " + e.message; $("ioMsg").className = "err"; }
@@ -632,9 +902,11 @@ $("importFile").onchange = async e => { const f = e.target.files[0]; if (f) doIm
 
 // small hook for automated tests; harmless otherwise
 window.qrgen = {
-  CONFIG, Storage, exportDoc, importDoc, render, payloadFromForm,
+  CONFIG, Storage, exportDoc, importDoc, render, renderAsync, payloadFromForm, opts,
   escapeWifi, buildWifi, escapeVCard, buildVCard, syncKindPanels,
+  LOGO_PRESETS, setLogo, normalizeOpts, contrastRatio,
   get codes() { return codes; },
+  get logoState() { return logoState; },
 };
 
 (async () => { await load(); renderList(); })();

@@ -70,7 +70,7 @@ async function gen(page, data, format, box, ec) {
      exp.codes.every((c, i) => ["id", "data", "format", "version", "created_at", "bytes"].every(k => c[k] === stored[i][k]) && JSON.stringify(c.options) === JSON.stringify(stored[i].options)));
   ok("A export has image_base64 for all", exp.codes.every(c => typeof c.image_base64 === "string" && c.image_base64.length > 100));
   ok("A image_base64 byte size == recorded bytes", exp.codes.every(c => Buffer.from(c.image_base64, "base64").length === c.bytes));
-  const noImg = await page.evaluate(() => window.qrgen.exportDoc(false));
+  const noImg = await page.evaluate(async () => await window.qrgen.exportDoc(false));
   ok("A export without images omits image_base64", noImg.codes.every(c => !("image_base64" in c)));
   // persistence across reload
   await page.reload({ waitUntil: "load" }); await page.waitForFunction(() => document.querySelectorAll("#codes tbody tr[data-id]").length > 0);
@@ -123,6 +123,19 @@ async function gen(page, data, format, box, ec) {
   ok("A2 Contact form generates vCard payload", contactSaved === vcardExpect, contactSaved);
   save("a-contact.png", await page.$eval("#qrImg", e => e.src));
   await page.select("#kind", "text");
+  // style: unofficial logo preset forces EC H
+  await page.evaluate(async () => {
+    const p = window.qrgen.LOGO_PRESETS.find(x => x.id === "bitcoin");
+    await window.qrgen.setLogo(p.dataUrl, p.id);
+  });
+  ok("A2 logo preset forces EC select to H", await page.$eval("#ec", e => e.value === "H" && e.disabled));
+  await page.evaluate(() => { document.querySelector("#genMsg").textContent = ""; });
+  await page.$eval("#data", el => { el.value = "https://example.com/logo-test"; });
+  await page.click("#gen");
+  await page.waitForFunction(() => /Version/.test(document.querySelector("#genMsg").textContent));
+  const logoOpts = await page.evaluate(() => window.qrgen.codes[window.qrgen.codes.length - 1]?.options);
+  ok("A2 saved options include logo + EC H", logoOpts && logoOpts.ec === "H" && typeof logoOpts.logo === "string" && logoOpts.logo.indexOf("data:image/") === 0, JSON.stringify({ ec: logoOpts?.ec, logo: !!logoOpts?.logo }));
+  await page.evaluate(async () => { await window.qrgen.setLogo(null); });
   await page.close();
 
   // ---------- B: mocked artifact window.storage (reported API) ----------
@@ -137,7 +150,11 @@ async function gen(page, data, format, box, ec) {
   const nCalls = b.calls.length;
   await page.click("#dbOn"); await gen(page, "https://example.com/off", "png", 10, "M");
   ok("B toggle off: zero storage calls", (await page.evaluate(() => window.__calls.length)) === nCalls);
-  const bexp = await page.evaluate(() => (document.querySelector("#dbOn").click(), new Promise(r => setTimeout(() => r(window.qrgen.exportDoc(true)), 200))));
+  const bexp = await page.evaluate(async () => {
+    document.querySelector("#dbOn").click();
+    await new Promise(r => setTimeout(r, 200));
+    return await window.qrgen.exportDoc(true);
+  });
   fs.writeFileSync(path.join(OUT, "b-export.json"), JSON.stringify(bexp));
   ok("B export count == stored rows", bexp.count === 2);
   await page.close();
